@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ingresar · Certificados de obra</title>
+<link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+<div class="login-bg">
+  <form class="login" id="f">
+    <h1>Certificados de obra</h1>
+    <p class="sub">Control de certificaciones por quincena</p>
+    <label for="u">Usuario</label>
+    <input id="u" autocomplete="username" autofocus required>
+    <label for="c">Contraseña</label>
+    <input id="c" type="password" autocomplete="current-password" required>
+    <button type="submit" id="b">Ingresar</button>
+    <div class="err" id="e" style="display:none"></div>
+  </form>
+</div>
+<script>
+const f=document.getElementById("f"),e=document.getElementById("e"),b=document.getElementById("b");
+f.addEventListener("submit",async ev=>{
+ ev.preventDefault(); e.style.display="none"; b.disabled=true; b.textContent="Ingresando…";
+ try{
+  const r=await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},
+   body:JSON.stringify({usuario:document.getElementById("u").value,
+    clave:document.getElementById("c").value})});
+  const d=await r.json();
+  if(!r.ok) throw new Error(d.error||"No se pudo ingresar");
+  location.href="/app.html";
+ }catch(x){
+  e.textContent=x.message; e.style.display="block";
+  b.disabled=false; b.textContent="Ingresar";
+  document.getElementById("c").select();
+ }
+});
+// si ya hay sesión, entrar directo
+fetch("/api/yo").then(r=>{if(r.ok)location.href="/app.html";});
+</script>
+</body>
+</html>
