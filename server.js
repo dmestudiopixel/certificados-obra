@@ -389,6 +389,15 @@ app.get("/api/reportes/obra", auth, async (req, res) => {
   res.json(await rep.avanceObra(o.id));
 });
 
+// resumen de obra: global por ítem y detalle por casa
+app.get("/api/reportes/resumen", auth, async (req, res) => {
+  try {
+    const { rows: [o] } = await q("SELECT id FROM obras WHERE activa ORDER BY id LIMIT 1");
+    if (!o) return res.status(404).json({ error: "No hay obra activa" });
+    res.json(await rep.resumenObra(o.id));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 /* ═══════════ bitácora ═══════════ */
 
 app.get("/api/bitacora", auth, esAdmin, async (req, res) => {

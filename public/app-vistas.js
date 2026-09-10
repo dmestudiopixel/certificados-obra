@@ -3,6 +3,7 @@ const TABS = [
   ["carga", "Carga", ["admin", "cargador"]],
   ["cert", "Certificados", ["admin", "cargador", "veedor"]],
   ["avance", "Avance", ["admin", "cargador", "veedor"]],
+  ["resumen", "Resumen de obra", ["admin", "cargador", "veedor"]],
   ["trabajos", "Parte de trabajos", ["admin", "cargador", "veedor"]],
   ["anticipos", "Anticipos", ["admin"]],
   ["precios", "Precios", ["admin", "cargador"]],
@@ -25,11 +26,13 @@ function render() {
     `<button data-tab="${k}" class="${S.tab === k ? "on" : ""}">${l}</button>`).join("");
 
   const v = $("vista");
-  const f = { carga: vCarga, cert: vCert, avance: vAvance, trabajos: vTrabajos,
-    anticipos: vAnticipos, precios: vPrecios, config: vConfig, usuarios: vUsuarios }[S.tab];
+  const f = { carga: vCarga, cert: vCert, avance: vAvance, resumen: vResumen,
+    trabajos: vTrabajos, anticipos: vAnticipos, precios: vPrecios,
+    config: vConfig, usuarios: vUsuarios }[S.tab];
   v.innerHTML = f ? f() : "";
   if (S.tab === "usuarios") cargarUsuarios();
   if (S.tab === "avance") cargarAvance();
+  if (S.tab === "resumen") cargarResumen();
   if (S.tab === "trabajos") cargarTrabajos();
 }
 
@@ -329,6 +332,114 @@ async function cargarAvance() {
       <div class="firmas"><div>Dirección de obra</div><div>Comitente</div></div></div>`;
     $("repAvance").innerHTML = h;
   } catch (e) { $("repAvance").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+/* ═══════════ 3.b RESUMEN DE OBRA (global por ítem y por casa) ═══════════ */
+function vResumen() {
+  return `<div class="card noprint" style="margin-bottom:14px"><div class="bar">
+    <span class="eyebrow">Resumen de obra</span>
+    <div class="spacer"></div>
+    <button class="btn ghost" onclick="window.print()">Imprimir / PDF</button></div></div>
+    <div id="repResumen"><div class="empty">Cargando…</div></div>`;
+}
+
+/* barrita de avance para usar dentro de una celda */
+function barra(p, color) {
+  const n = Math.round(p * 100);
+  return `<div style="display:flex;align-items:center;gap:7px">
+    <div style="flex:1;min-width:52px;height:6px;background:var(--line2);
+      border-radius:3px;overflow:hidden">
+      <div style="height:100%;width:${n}%;background:${color}"></div></div>
+    <b class="mono" style="font-size:11px;width:34px;text-align:right">${n}%</b></div>`;
+}
+
+async function cargarResumen() {
+  try {
+    const o = O();
+    const d = await api("GET", "/api/reportes/resumen");
+    const porCasa = d.items.filter(i => i.tipo === "CASA");
+    const libres = d.items.filter(i => i.tipo === "LIBRE" && i.unidades > 0);
+    const VERDE = "var(--own)", AMBAR = "var(--full)";
+
+    if (!d.total_casas)
+      return $("repResumen").innerHTML = `<div class="empty">No hay casas cargadas.</div>`;
+
+    const terminadas = d.casas.filter(c => c.avance >= 0.999).length;
+
+    let h = `<div class="doc ancho"><div class="head">
+      <div><h1>Resumen de obra</h1>
+      <div style="font-size:12px;color:var(--muted);margin-top:3px">${esc(o.obra.nombre)}</div></div>
+      <div class="mono" style="font-size:12px;text-align:right">
+        ${terminadas} de ${d.total_casas} casas terminadas</div></div>
+
+      <div style="margin-top:8px;font-size:11px;color:var(--muted)">
+        <span style="color:${VERDE};font-weight:700">■</span> completa ·
+        <span style="color:${AMBAR};font-weight:700">■</span> en curso ·
+        <span style="font-weight:700">—</span> sin empezar</div>`;
+
+    /* ── 1. global por ítem ── */
+    h += `<div style="margin-top:20px;font-size:10px;font-weight:700;letter-spacing:.13em;
+      text-transform:uppercase;color:var(--muted)">Global por ítem</div>
+      <table class="tb" style="margin-top:6px"><thead><tr><th>Ítem</th>
+      <th class="n">Completas</th><th class="n">En curso</th><th class="n">Faltan</th>
+      <th class="n">Total casas</th><th style="width:190px">Avance</th>
+      </tr></thead><tbody>${porCasa.map(i => `<tr>
+        <td>${esc(i.tarea)}</td>
+        <td class="n mono" style="color:${VERDE};font-weight:700">${i.completas}</td>
+        <td class="n mono" style="color:${AMBAR}">${i.parciales || "—"}</td>
+        <td class="n mono" style="font-weight:700">${i.sin_empezar + i.parciales || "—"}</td>
+        <td class="n mono">${i.total_casas}</td>
+        <td>${barra(i.avance, i.avance >= 0.999 ? VERDE : AMBAR)}</td>
+      </tr>`).join("")}</tbody></table>`;
+
+    if (libres.length)
+      h += `<div style="margin-top:20px;font-size:10px;font-weight:700;letter-spacing:.13em;
+        text-transform:uppercase;color:var(--muted)">Ítems libres · total certificado</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">
+          Estos ítems se cargan sin casa, así que solo se puede informar el total acumulado.</div>
+        <table class="tb" style="margin-top:6px"><thead><tr><th>Ítem</th>
+        <th class="n">Unidades certificadas</th></tr></thead><tbody>${libres.map(i => `<tr>
+          <td>${esc(i.tarea)}</td>
+          <td class="n mono" style="font-weight:700">${qty(i.unidades)}</td>
+        </tr>`).join("")}</tbody></table>`;
+
+    /* ── 2. qué falta, por ítem ── */
+    const conPend = porCasa.filter(i => i.pendientes.length);
+    h += `<div style="margin-top:26px;font-size:10px;font-weight:700;letter-spacing:.13em;
+      text-transform:uppercase;color:var(--muted)">Qué falta, ítem por ítem</div>`;
+    h += conPend.length ? conPend.map(i => `
+      <div style="margin-top:12px">
+        <div style="font-size:12.5px;font-weight:600">${esc(i.tarea)}
+          <span style="font-weight:400;color:var(--muted)">— faltan
+          ${i.sin_empezar + i.parciales} de ${i.total_casas}</span></div>
+        <div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:6px">${i.pendientes.map(p =>
+          `<span class="chip"${p.cant > 0
+            ? ` style="border-color:${AMBAR};color:${AMBAR};font-weight:600"`
+            : ""}>${esc(p.casa)}${p.cant > 0 ? " · " + Math.round(p.cant * 100) + "%" : ""}</span>`
+        ).join("")}</div></div>`).join("")
+      : `<div style="margin-top:10px;font-size:13px;color:${VERDE};font-weight:600">
+          ✓ No falta nada: todos los ítems están completos en todas las casas.</div>`;
+
+    /* ── 3. detalle por casa ── */
+    h += `<div style="margin-top:26px;font-size:10px;font-weight:700;letter-spacing:.13em;
+      text-transform:uppercase;color:var(--muted)">Detalle por casa</div>
+      <div style="overflow-x:auto"><table class="tb" style="margin-top:6px"><thead><tr>
+      <th>Casa</th><th>Mz</th>${d.tareas_casa.map(t =>
+        `<th class="n">${esc(t)}</th>`).join("")}<th style="width:150px">Avance</th>
+      </tr></thead><tbody>${d.casas.map(c => `<tr>
+        <td class="mono" style="font-weight:600">${esc(c.casa)}</td>
+        <td class="mono" style="color:var(--muted)">${esc(c.manzana)}</td>
+        ${c.items.map(it => `<td class="n mono">${
+          it.estado === "completa" ? `<b style="color:${VERDE}">✓</b>`
+          : it.estado === "parcial" ? `<span style="color:${AMBAR}">${Math.round(it.cant * 100)}%</span>`
+          : `<span style="color:var(--muted)">—</span>`}</td>`).join("")}
+        <td>${barra(c.avance, c.avance >= 0.999 ? VERDE : AMBAR)}</td>
+      </tr>`).join("")}</tbody></table></div>
+
+      <div class="firmas"><div>Dirección de obra</div><div>Comitente</div></div></div>`;
+
+    $("repResumen").innerHTML = h;
+  } catch (e) { $("repResumen").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
 
 /* ═══════════ 4. PARTE DE TRABAJOS ═══════════ */

@@ -148,4 +148,74 @@ async function avanceObra(obraId) {
   }));
 }
 
-module.exports = { datosQuincena, totales, cantidadDe, reporteAvance, reporteTrabajos, avanceObra };
+/* ═══════ RESUMEN DE OBRA: global por ítem y detalle por casa ═══════
+ *
+ *  Solo lee: acumula todo lo cargado en TODAS las quincenas de la obra.
+ *  Una tarea POR CASA se considera terminada cuando la casa llega a 1,00
+ *  (mismo criterio que usa el avance físico).
+ *  Las tareas LIBRES no tienen casa, así que solo se informa el total. */
+async function resumenObra(obraId) {
+  const [tareas, casas, acum, glob] = await Promise.all([
+    q(`SELECT id, nombre, tipo FROM tareas
+       WHERE obra_id=$1 AND activa ORDER BY orden, id`, [obraId]),
+    q(`SELECT ca.id, ca.nombre, m.nombre AS manzana
+       FROM casas ca JOIN manzanas m ON m.id=ca.manzana_id
+       WHERE m.obra_id=$1 ORDER BY m.orden, ca.orden`, [obraId]),
+    q(`SELECT c.tarea_id, c.casa_id, SUM(c.cantidad) AS total
+       FROM cargas c JOIN quincenas x ON x.id=c.quincena_id
+       WHERE x.obra_id=$1 GROUP BY 1,2`, [obraId]),
+    q(`SELECT g.tarea_id, SUM(g.cantidad) AS total
+       FROM globales g JOIN quincenas x ON x.id=g.quincena_id
+       WHERE x.obra_id=$1 GROUP BY 1`, [obraId]),
+  ]);
+
+  const ac = {};                       // ac[tarea][casa] = cantidad acumulada
+  for (const r of acum.rows) (ac[r.tarea_id] = ac[r.tarea_id] || {})[r.casa_id] = +r.total;
+  const gl = {};                       // gl[tarea] = unidades acumuladas (libres)
+  for (const r of glob.rows) gl[r.tarea_id] = +r.total;
+
+  const LISTO = 0.999;
+  const nCasas = casas.rows.length;
+  const porCasa = tareas.rows.filter(t => t.tipo === "CASA");
+  const cant = (tid, caid) => (ac[tid] || {})[caid] || 0;
+
+  const items = tareas.rows.map(t => {
+    if (t.tipo === "LIBRE")
+      return { tarea: t.nombre, tipo: "LIBRE", unidades: gl[t.id] || 0 };
+
+    let completas = 0, parciales = 0, suma = 0;
+    const pendientes = [];
+    for (const c of casas.rows) {
+      const v = cant(t.id, c.id);
+      suma += Math.min(1, v);
+      if (v >= LISTO) completas++;
+      else {
+        if (v > 0) parciales++;
+        pendientes.push({ casa: c.nombre, manzana: c.manzana, cant: v });
+      }
+    }
+    return {
+      tarea: t.nombre, tipo: "CASA", total_casas: nCasas,
+      completas, parciales, sin_empezar: nCasas - completas - parciales,
+      avance: nCasas ? suma / nCasas : 0, pendientes,
+    };
+  });
+
+  const detalle = casas.rows.map(c => {
+    let suma = 0;
+    const its = porCasa.map(t => {
+      const v = cant(t.id, c.id);
+      suma += Math.min(1, v);
+      return { tarea: t.nombre, cant: v,
+        estado: v >= LISTO ? "completa" : v > 0 ? "parcial" : "vacia" };
+    });
+    return { casa: c.nombre, manzana: c.manzana,
+      avance: porCasa.length ? suma / porCasa.length : 0, items: its };
+  });
+
+  return { total_casas: nCasas, tareas_casa: porCasa.map(t => t.nombre),
+    items, casas: detalle };
+}
+
+module.exports = { datosQuincena, totales, cantidadDe, reporteAvance, reporteTrabajos,
+  avanceObra, resumenObra };
