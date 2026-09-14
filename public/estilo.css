@@ -167,6 +167,30 @@ border-radius:8px;margin-left:6px;font-weight:600}
 .casita .cb{height:4px;background:var(--line2);border-radius:2px;overflow:hidden;margin:4px 0 3px}
 .casita .cp{font-size:10px;color:var(--muted)}
 
+/* cargar por casa (buscadores) */
+.bq-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;padding:13px}
+.bq-caja{display:flex;flex-direction:column;gap:7px;min-width:0}
+.bq-caja input{padding:8px 10px;border:1px solid var(--line);border-radius:3px;width:100%}
+.bq-sel:empty{display:none}
+.bq-lista{display:flex;flex-wrap:wrap;gap:5px;max-height:150px;overflow:auto}
+.bq-lista:empty{display:none}
+.bq-lista .chip,.bq-sel .chip{cursor:pointer;background:#fff}
+.bq-lista .chip:hover{border-color:var(--accent);color:var(--accent)}
+.bq-lista .chip small{color:var(--muted);font-size:9.5px}
+.bq-nada{font-size:11.5px;color:var(--muted);padding:3px 2px}
+.bq-tag{font-size:11px;font-weight:600;padding:3px 8px;border-radius:10px;white-space:nowrap}
+.bq-tag.libre,.bq-tag.curso{background:var(--ownbg);color:var(--own)}
+.bq-tag.completa{background:var(--fullbg);color:#7A5312}
+.bq-tag.ajena{background:var(--blockbg);color:#4A5663}
+.bq-tb td{vertical-align:middle}
+.bq-tb tr.bq-f-ajena td{color:var(--muted)}
+.bq-in{display:inline-flex;align-items:center;gap:3px}
+.bq-in input{width:68px;padding:6px 7px;text-align:right;border:1px solid var(--line);border-radius:3px}
+.bq-in input:disabled{background:var(--canvas)}
+.bq-in i{font-style:normal;color:var(--muted);font-size:12px}
+.bq-max{font-size:10px;color:var(--muted);margin-top:2px}
+.bq-ro{padding:9px 13px;background:var(--fullbg);color:#7A5312;font-size:12px}
+
 @media print{
  .top,nav,.bar,.noprint{display:none!important}
  body,.wrap{background:#fff;padding:0}

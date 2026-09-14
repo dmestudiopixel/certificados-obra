@@ -1,6 +1,7 @@
 /* ═══════════ chrome ═══════════ */
 const TABS = [
   ["carga", "Carga", ["admin", "cargador"]],
+  ["buscar", "Cargar por casa", ["admin", "cargador"]],
   ["cert", "Certificados", ["admin", "cargador", "veedor"]],
   ["avance", "Avance", ["admin", "cargador", "veedor"]],
   ["resumen", "Resumen de obra", ["admin", "cargador", "veedor"]],
@@ -26,10 +27,11 @@ function render() {
     `<button data-tab="${k}" class="${S.tab === k ? "on" : ""}">${l}</button>`).join("");
 
   const v = $("vista");
-  const f = { carga: vCarga, cert: vCert, avance: vAvance, resumen: vResumen,
+  const f = { carga: vCarga, buscar: vBuscar, cert: vCert, avance: vAvance, resumen: vResumen,
     trabajos: vTrabajos, anticipos: vAnticipos, precios: vPrecios,
     config: vConfig, usuarios: vUsuarios }[S.tab];
   v.innerHTML = f ? f() : "";
+  if (S.tab === "buscar") pintarBuscador();
   if (S.tab === "usuarios") cargarUsuarios();
   if (S.tab === "avance") cargarAvance();
   if (S.tab === "resumen") cargarResumen();
