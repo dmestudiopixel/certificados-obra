@@ -217,5 +217,79 @@ async function resumenObra(obraId) {
     items, casas: detalle };
 }
 
+/* ═══════ DINERO POR TAREA: invertido, faltante estimado y total de obra ═══════
+ *
+ *  Solo lee. Todo se calcula hasta la quincena elegida, inclusive.
+ *  - Invertido: lo certificado, a los precios congelados de cada quincena.
+ *  - Falta: en las tareas POR CASA, lo que falta para que todas las casas lleguen
+ *    a 1,00, al precio vigente (el de la quincena elegida o, si no tiene, el
+ *    último cargado antes). Supone que cada tarea se hace en todas las casas.
+ *  - Las tareas LIBRES no tienen cantidad total conocida: solo se informa lo invertido. */
+async function dineroPorTarea(qid) {
+  const { rows: [qn] } = await q("SELECT * FROM quincenas WHERE id=$1", [qid]);
+  if (!qn) throw new Error("Quincena inexistente");
+  const P = [qn.obra_id, qn.orden];
+
+  const [tareas, casas, inv, invG, acum, precios] = await Promise.all([
+    q(`SELECT id, nombre, tipo FROM tareas WHERE obra_id=$1 AND activa ORDER BY orden, id`,
+      [qn.obra_id]),
+    q(`SELECT COUNT(*) AS n FROM casas ca JOIN manzanas m ON m.id=ca.manzana_id
+       WHERE m.obra_id=$1`, [qn.obra_id]),
+    q(`SELECT c.tarea_id, SUM(c.cantidad * COALESCE(p.monto,0)) AS monto
+       FROM cargas c JOIN quincenas x ON x.id=c.quincena_id
+       LEFT JOIN precios p ON p.quincena_id=c.quincena_id AND p.tarea_id=c.tarea_id
+       WHERE x.obra_id=$1 AND x.orden <= $2 GROUP BY 1`, P),
+    q(`SELECT g.tarea_id, SUM(g.cantidad * COALESCE(p.monto,0)) AS monto, SUM(g.cantidad) AS cant
+       FROM globales g JOIN quincenas x ON x.id=g.quincena_id
+       LEFT JOIN precios p ON p.quincena_id=g.quincena_id AND p.tarea_id=g.tarea_id
+       WHERE x.obra_id=$1 AND x.orden <= $2 GROUP BY 1`, P),
+    // casas equivalentes hechas por tarea (cada casa cuenta como máximo 1,00)
+    q(`SELECT s.tarea_id, SUM(LEAST(s.t,1)) AS hechas FROM (
+         SELECT c.tarea_id, c.casa_id, SUM(c.cantidad) AS t
+         FROM cargas c JOIN quincenas x ON x.id=c.quincena_id
+         WHERE x.obra_id=$1 AND x.orden <= $2 GROUP BY 1,2) s
+       GROUP BY 1`, P),
+    // precio vigente: el más reciente con monto, hasta la quincena elegida
+    q(`SELECT DISTINCT ON (p.tarea_id) p.tarea_id, p.monto, x.id AS qid, x.nombre AS qnombre
+       FROM precios p JOIN quincenas x ON x.id=p.quincena_id
+       WHERE x.obra_id=$1 AND x.orden <= $2 AND p.monto > 0
+       ORDER BY p.tarea_id, x.orden DESC, x.id DESC`, P),
+  ]);
+
+  const mapa = (rows, campo) => Object.fromEntries(rows.map(r => [r.tarea_id, +r[campo]]));
+  const mInv = mapa(inv.rows, "monto"), mInvG = mapa(invG.rows, "monto");
+  const mCantG = mapa(invG.rows, "cant"), mHechas = mapa(acum.rows, "hechas");
+  const mPrecio = {};
+  for (const r of precios.rows)
+    mPrecio[r.tarea_id] = { monto: +r.monto, de: r.qid === qn.id ? null : r.qnombre };
+  const nCasas = Number(casas.rows[0].n);
+
+  const filas = tareas.rows.map(t => {
+    const pr = mPrecio[t.id];
+    const base = { tarea: t.nombre, tipo: t.tipo, precio: pr ? pr.monto : 0,
+      precio_de: pr ? pr.de : null, invertido: (mInv[t.id] || 0) + (mInvG[t.id] || 0) };
+    if (t.tipo === "LIBRE")
+      return { ...base, cantidad: mCantG[t.id] || 0, faltan: null, falta: null,
+        total: base.invertido, avance: null };
+
+    const hechas = Math.min(nCasas, mHechas[t.id] || 0);
+    const faltan = Math.max(0, nCasas - hechas);
+    // null = falta algo pero no hay precio para estimarlo
+    const falta = faltan < 0.0001 ? 0 : pr ? faltan * pr.monto : null;
+    return { ...base, hechas, faltan, falta,
+      total: falta === null ? null : base.invertido + falta,
+      avance: nCasas ? hechas / nCasas : 0 };
+  });
+
+  const invertido = filas.reduce((s, f) => s + f.invertido, 0);
+  const falta = filas.reduce((s, f) => s + (f.falta || 0), 0);
+  return {
+    quincena: qn, total_casas: nCasas, filas,
+    totales: { invertido, falta, total: invertido + falta,
+      sin_precio: filas.filter(f => f.tipo === "CASA" && f.falta === null).map(f => f.tarea),
+      libres: filas.filter(f => f.tipo === "LIBRE" && f.invertido > 0).length },
+  };
+}
+
 module.exports = { datosQuincena, totales, cantidadDe, reporteAvance, reporteTrabajos,
-  avanceObra, resumenObra };
+  avanceObra, resumenObra, dineroPorTarea };

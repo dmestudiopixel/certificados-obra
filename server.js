@@ -377,6 +377,12 @@ app.get("/api/reportes/avance/:qid", auth, async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// dinero por tarea: invertido, faltante estimado y total de obra (hasta la quincena)
+app.get("/api/reportes/dinero/:qid", auth, async (req, res) => {
+  try { res.json(await rep.dineroPorTarea(+req.params.qid)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // parte de trabajos, agrupado por tarea, con cantidades y sin plata
 app.get("/api/reportes/trabajos/:qid", auth, async (req, res) => {
   try { res.json(await rep.reporteTrabajos(+req.params.qid, req.query.contratista)); }

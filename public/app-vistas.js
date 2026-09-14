@@ -269,12 +269,78 @@ function vAvance() {
     <div id="repAvance"><div class="empty">Cargando…</div></div>`;
 }
 
+/* sección "Dinero por tarea" dentro de Avance */
+function dineroHtml(din) {
+  const T = din.totales;
+  const pInv = T.total ? T.invertido / T.total : 0;
+  const caja = (tit, val, sub, fuerte) => `<div style="flex:1;min-width:190px;
+    border:1px solid ${fuerte ? "var(--own)" : "var(--line)"};border-radius:3px;padding:10px 12px;
+    background:${fuerte ? "var(--ownbg)" : "#fff"}">
+    <div style="font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+      color:var(--muted)">${tit}</div>
+    <div class="mono" style="font-size:19px;font-weight:700;margin-top:3px">${money(val)}</div>
+    <div style="font-size:11px;color:var(--muted);margin-top:2px">${sub}</div></div>`;
+  const nd = `<span style="color:var(--muted);font-weight:400">—</span>`;
+
+  let h = `<div style="margin-top:26px;font-size:10px;font-weight:700;letter-spacing:.13em;
+    text-transform:uppercase;color:var(--muted)">Dinero por tarea · hasta ${esc(din.quincena.nombre)}</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px">
+      ${caja("Total estimado de la obra", T.total, "invertido + lo que falta")}
+      ${caja("Invertido hasta hoy", T.invertido, Math.round(pInv * 100) + "% del total estimado")}
+      ${caja("Falta invertir (estimado)", T.falta, "a precio vigente", true)}
+    </div>
+    <table class="tb" style="margin-top:12px"><thead><tr><th>Tarea</th>
+    <th class="n">Precio vigente</th><th style="width:150px">Avance</th>
+    <th class="n">Invertido</th><th class="n">Faltan (casas)</th>
+    <th class="n">Falta invertir</th><th class="n">Total estimado</th></tr></thead><tbody>`;
+
+  for (const f of din.filas) {
+    const libre = f.tipo === "LIBRE";
+    if (libre && !f.invertido) continue;          // libres sin movimiento no aportan nada
+    const precio = f.precio
+      ? money(f.precio) + (f.precio_de
+        ? `<div style="font-size:10px;color:var(--muted)">de ${esc(f.precio_de)}</div>` : "")
+      : libre ? nd : `<span style="color:var(--over)">sin precio</span>`;
+    h += `<tr>
+      <td>${esc(f.tarea)}${libre ? ` <small style="color:var(--muted)">(libre · ${qty(f.cantidad)} u.)</small>` : ""}</td>
+      <td class="n mono">${precio}</td>
+      <td>${libre ? nd : barra(f.avance, f.avance >= 0.999 ? "var(--own)" : "var(--full)")}</td>
+      <td class="n mono">${f.invertido ? money(f.invertido) : nd}</td>
+      <td class="n mono">${libre ? nd : qty(f.faltan) || nd}</td>
+      <td class="n mono" style="font-weight:700">${libre
+        ? `<span style="color:var(--muted);font-weight:400">sin estimar</span>`
+        : f.falta === null ? `<span style="color:var(--over)">sin precio</span>`
+        : f.falta ? money(f.falta) : nd}</td>
+      <td class="n mono">${f.total === null ? nd : money(f.total)}</td></tr>`;
+  }
+  h += `</tbody><tfoot><tr><td>TOTAL OBRA</td><td></td><td></td>
+    <td class="n mono">${money(T.invertido)}</td><td></td>
+    <td class="n mono">${money(T.falta)}</td><td class="n mono">${money(T.total)}</td>
+    </tr></tfoot></table>`;
+
+  const notas = [
+    "Falta invertir = lo que le falta a cada tarea para llegar al 100% en todas las casas, " +
+      "al precio vigente (el de esta quincena o, si no tiene, el último cargado antes).",
+    "Supone que cada tarea por casa se hace en todas las casas. Montos brutos: " +
+      "no descuentan retención ni anticipos.",
+  ];
+  if (T.libres) notas.push("Las tareas libres no tienen cantidad total conocida: " +
+    "suman lo invertido, pero no se estima lo que les falta.");
+  let aviso = "";
+  if (T.sin_precio.length)
+    aviso = `<div style="font-size:11.5px;color:var(--over);margin-top:6px">
+      Sin precio cargado: ${T.sin_precio.map(esc).join(", ")}. Lo que les falta no está sumado al total.</div>`;
+  return h + aviso + `<div style="font-size:11px;color:var(--muted);margin-top:6px;line-height:1.55">
+    ${notas.map(n => "· " + n).join("<br>")}</div>`;
+}
+
 async function cargarAvance() {
   try {
     const o = O();
-    const [d, casas] = await Promise.all([
+    const [d, casas, din] = await Promise.all([
       api("GET", "/api/reportes/avance/" + S.repQ),
       api("GET", "/api/reportes/obra"),
+      api("GET", "/api/reportes/dinero/" + S.repQ),
     ]);
     const t = d.filas.reduce((a, f) => ({
       bruto: a.bruto + f.bruto, ret: a.ret + f.ret, neto: a.neto + f.neto,
@@ -320,6 +386,8 @@ async function cargarAvance() {
       <tfoot><tr><td>TOTAL</td><td class="n mono">${money(t.ab)}</td>
       <td class="n mono">${money(t.an)}</td><td class="n mono">${money(t.aa)}</td>
       </tr></tfoot></table>`;
+
+    h += dineroHtml(din);
 
     const hechas = casas.filter(c => c.avance >= 0.999).length;
     const prom = casas.reduce((s, c) => s + c.avance, 0) / (casas.length || 1);
