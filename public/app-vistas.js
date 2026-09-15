@@ -5,6 +5,7 @@ const TABS = [
   ["cert", "Certificados", ["admin", "cargador", "veedor"]],
   ["avance", "Avance", ["admin", "cargador", "veedor"]],
   ["resumen", "Resumen de obra", ["admin", "cargador", "veedor"]],
+  ["plano", "Plano", ["admin", "cargador", "veedor"]],
   ["trabajos", "Parte de trabajos", ["admin", "cargador", "veedor"]],
   ["anticipos", "Anticipos", ["admin"]],
   ["precios", "Precios", ["admin", "cargador"]],
@@ -28,13 +29,14 @@ function render() {
 
   const v = $("vista");
   const f = { carga: vCarga, buscar: vBuscar, cert: vCert, avance: vAvance, resumen: vResumen,
-    trabajos: vTrabajos, anticipos: vAnticipos, precios: vPrecios,
+    plano: vPlano, trabajos: vTrabajos, anticipos: vAnticipos, precios: vPrecios,
     config: vConfig, usuarios: vUsuarios }[S.tab];
   v.innerHTML = f ? f() : "";
   if (S.tab === "buscar") pintarBuscador();
   if (S.tab === "usuarios") cargarUsuarios();
   if (S.tab === "avance") cargarAvance();
   if (S.tab === "resumen") cargarResumen();
+  if (S.tab === "plano") pintarPlano();
   if (S.tab === "trabajos") cargarTrabajos();
 }
 
