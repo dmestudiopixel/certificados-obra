@@ -284,6 +284,79 @@ app.patch("/api/quincenas/:id", auth, esAdmin, async (req, res) => {
   res.json({ ok: true });
 });
 
+// qué tiene cargado una quincena y si se puede eliminar (solo la última, abierta)
+async function estadoBorrado(c, id) {
+  const { rows: [qn] } = await c.query("SELECT * FROM quincenas WHERE id=$1", [id]);
+  if (!qn) return { error: "No existe esa quincena", code: 404 };
+  const { rows: [ult] } = await c.query(
+    "SELECT id FROM quincenas WHERE obra_id=$1 ORDER BY orden DESC, id DESC LIMIT 1", [qn.obra_id]);
+  const { rows: [{ n: total }] } = await c.query(
+    "SELECT COUNT(*)::int AS n FROM quincenas WHERE obra_id=$1", [qn.obra_id]);
+  const cuenta = async t => (await c.query(
+    `SELECT COUNT(*)::int AS n FROM ${t} WHERE quincena_id=$1` +
+    (t === "anticipos" ? "" : " AND cantidad<>0"), [id])).rows[0].n;
+  const cnt = { cargas: await cuenta("cargas"), globales: await cuenta("globales"),
+    anticipos: await cuenta("anticipos") };
+  let error = null;
+  if (ult.id !== qn.id) error = "Solo se puede eliminar la última quincena.";
+  else if (total <= 1) error = "Es la única quincena de la obra; no se puede eliminar.";
+  else if (qn.cerrada) error = `${qn.nombre} está cerrada. Reabrila primero si querés eliminarla.`;
+  return { qn, ...cnt, vacia: !cnt.cargas && !cnt.globales && !cnt.anticipos, error };
+}
+
+app.get("/api/quincenas/:id/borrable", auth, esAdmin, async (req, res) => {
+  const e = await estadoBorrado({ query: q }, +req.params.id);
+  if (e.code) return res.status(e.code).json({ error: e.error });
+  const { qn, ...resto } = e;
+  res.json({ nombre: qn.nombre, ...resto });
+});
+
+app.delete("/api/quincenas/:id", auth, esAdmin, async (req, res) => {
+  const id = +req.params.id;
+  try {
+    const e = await tx(async c => {
+      const e = await estadoBorrado(c, id);
+      if (e.code) throw { code: e.code, msg: e.error };
+      if (e.error) throw { code: 409, msg: e.error };
+      // con datos cargados hay que confirmar escribiendo el nombre
+      if (!e.vacia && (req.body || {}).confirmar !== e.qn.nombre)
+        throw { code: 409, msg: `${e.qn.nombre} tiene datos cargados. Escribí su nombre para confirmar.` };
+      await c.query("DELETE FROM quincenas WHERE id=$1", [id]);   // en cascada: cargas, precios, anticipos
+      return e;
+    });
+    await log(req.user.id, "quincena_baja", `${e.qn.nombre} (id ${id}): ` +
+      `${e.cargas} cargas por casa, ${e.globales} tareas libres, ${e.anticipos} anticipos`);
+    res.json({ ok: true });
+  } catch (x) {
+    res.status(x.code || 500).json({ error: x.msg || x.message });
+  }
+});
+
+/* ═══════════ backup (solo admin) ═══════════ */
+
+// todos los datos en un JSON descargable; las claves de usuario no se incluyen
+app.get("/api/backup", auth, esAdmin, async (req, res) => {
+  const tablas = ["obras", "manzanas", "casas", "tareas", "contratistas", "contratista_tareas",
+    "quincenas", "precios", "cargas", "globales", "anticipos", "bitacora"];
+  try {
+    const datos = await tx(async c => {
+      await c.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ");  // foto consistente
+      const d = {};
+      for (const t of tablas) d[t] = (await c.query(`SELECT * FROM ${t}`)).rows;
+      d.usuarios = (await c.query(
+        "SELECT id,usuario,nombre,rol,activo,creado FROM usuarios ORDER BY id")).rows;
+      return d;
+    });
+    const ahora = new Date();
+    const f = new Date(ahora.getTime() - 3 * 3600e3).toISOString()   // hora de Argentina
+      .slice(0, 16).replace("T", "_").replace(":", "-");
+    await log(req.user.id, "backup", "descarga completa");
+    res.setHeader("Content-Disposition", `attachment; filename="backup-certificados-${f}.json"`);
+    res.json({ sistema: "certificados-obra", generado: ahora.toISOString(),
+      por: req.user.usuario, datos });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 /* ═══════════ precios ═══════════ */
 
 app.post("/api/precio", auth, rol("admin", "cargador"), async (req, res) => {

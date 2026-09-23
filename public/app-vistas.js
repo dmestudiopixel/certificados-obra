@@ -63,6 +63,10 @@ function vCarga() {
     h += q.cerrada
       ? `<button class="btn ghost" id="btnAbrir">Reabrir quincena</button>`
       : `<button class="btn ghost" id="btnCerrar">Cerrar quincena</button>`;
+    // solo la última quincena, abierta, y si no es la única
+    const qs = o.quincenas;
+    if (!q.cerrada && qs.length > 1 && qs[qs.length - 1].id === q.id)
+      h += `<button class="btn ghost" id="btnBorrarQ" style="color:var(--over)">Eliminar quincena</button>`;
     h += `<button class="btn" id="btnNuevaQ">Nueva quincena</button>`;
   }
   h += `</div><div class="scroll"><table class="grid"><thead><tr class="mz">

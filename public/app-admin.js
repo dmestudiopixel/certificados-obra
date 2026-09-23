@@ -141,13 +141,21 @@ function vUsuarios() {
       <table class="tb"><thead><tr><th>Rol</th><th>Permisos</th></tr></thead><tbody>
       <tr><td><span class="badge admin">admin</span></td>
         <td>Todo: cargar, precios, anticipos, contratistas, usuarios, cerrar y
-            <b>reabrir</b> quincenas, y modificar quincenas cerradas.</td></tr>
+            <b>reabrir</b> quincenas, modificar quincenas cerradas, <b>eliminar la última
+            quincena</b> y descargar el backup.</td></tr>
       <tr><td><span class="badge cargador">cargador</span></td>
         <td>Cargar la quincena abierta y ajustar precios. No puede tocar anticipos,
             contratistas ni usuarios. <b>No puede modificar una quincena cerrada.</b></td></tr>
       <tr><td><span class="badge veedor">veedor</span></td>
         <td>Solo ver certificados, avance y parte de trabajos. No modifica nada.</td></tr>
       </tbody></table></div>
+    <div class="card" style="margin-top:14px"><div class="bar">
+      <span class="eyebrow">Backup</span>
+      <span style="font-size:11.5px;color:var(--muted)">Descarga un archivo con todos los datos
+        (casas, tareas, contratistas, quincenas, precios, cargas y anticipos).
+        Guardalo en la PC o en Drive, por ejemplo antes de cerrar cada quincena.</span>
+      <div class="spacer"></div>
+      <button class="btn" id="btnBackup">Descargar backup</button></div></div>
     <div class="card" style="margin-top:14px"><div class="bar">
       <span class="eyebrow">Bitácora</span>
       <span style="font-size:11.5px;color:var(--muted)">Últimos movimientos del sistema</span></div>
@@ -179,6 +187,19 @@ async function cargarUsuarios() {
          <td>${esc(b.unombre || "—")}</td><td class="mono" style="font-size:11.5px">${esc(b.accion)}</td>
          <td style="color:var(--muted)">${esc(b.detalle || "")}</td></tr>`).join("")}</tbody></table>`;
   } catch (e) { $("listaUsuarios").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+/* baja el backup completo como archivo; espera a que termine antes de seguir */
+async function descargarBackup() {
+  const r = await fetch("/api/backup");
+  if (!r.ok) throw new Error("No se pudo generar el backup");
+  const nombre = (/filename="([^"]+)"/.exec(r.headers.get("Content-Disposition") || "") || [])[1]
+    || "backup-certificados.json";
+  const url = URL.createObjectURL(await r.blob());
+  const a = document.createElement("a");
+  a.href = url; a.download = nombre;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
 /* ═══════════ EVENTOS ═══════════ */
@@ -269,6 +290,34 @@ document.addEventListener("click", async e => {
       await api("POST", `/api/quincenas/${S.qid}/cerrar`);
       await recargarObra(); render();
       avisar(`${Q().nombre} cerrada.`, true); return;
+    }
+    if (b.id === "btnBorrarQ") {
+      const e = await api("GET", `/api/quincenas/${S.qid}/borrable`);
+      if (e.error) { avisar(e.error); return; }
+      let confirmar = null;
+      if (e.vacia) {
+        if (!confirm(`¿Eliminar ${e.nombre}?\n\nNo tiene nada cargado (solo los precios copiados). ` +
+          `Esto no se puede deshacer.`)) return;
+      } else {
+        confirmar = prompt(`${e.nombre} tiene datos cargados:\n` +
+          `  · ${e.cargas} cargas por casa\n  · ${e.globales} tareas libres\n` +
+          `  · ${e.anticipos} anticipos\n\nSe van a borrar junto con la quincena. ` +
+          `Antes se descarga un backup automáticamente.\n\n` +
+          `Para confirmar, escribí el nombre de la quincena (${e.nombre}):`, "");
+        if (confirmar === null) return;
+        if (confirmar.trim() !== e.nombre) { avisar("El nombre no coincide. No se borró nada."); return; }
+        confirmar = confirmar.trim();
+        await descargarBackup();
+      }
+      await api("DELETE", `/api/quincenas/${S.qid}`, { confirmar });
+      await recargarObra();
+      S.qid = O().quincenas[O().quincenas.length - 1].id;
+      S.cache = {};
+      await recargarQuincena(); render();
+      avisar(`${e.nombre} eliminada. Queda registrado en la bitácora.`, true); return;
+    }
+    if (b.id === "btnBackup") {
+      await descargarBackup(); avisar("Backup descargado.", true); return;
     }
     if (b.id === "btnAbrir") {
       if (!confirm(`¿Reabrir ${Q().nombre}?\n\nVuelve a quedar editable para el usuario de carga.`)) return;
