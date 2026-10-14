@@ -146,3 +146,20 @@ public/            la interfaz web
 test.js            pruebas del backend
 test-front.js      pruebas del frontend
 ```
+
+---
+
+## Backup y restauración
+
+- **Backup completo:** pestaña *Usuarios* → **Backup completo (ZIP)** (solo administrador).
+  Trae `datos.json` (todas las tablas, con los usuarios y sus claves cifradas),
+  `aplicacion/` (el programa entero) y `COMO-RESTAURAR.txt`. Conviene bajarlo **cada 15 días**;
+  la app avisa al administrador cuando pasaron 15 días sin uno.
+- **Restaurar** en una base PostgreSQL **vacía**, antes de arrancar la web:
+
+  ```
+  npm install
+  DATABASE_URL="postgresql://…" node restaurar.js backup-completo-certificados-….zip
+  ```
+
+  Si la base ya tiene datos no hace nada (con `--reemplazar` la pisa). Corre en una transacción.

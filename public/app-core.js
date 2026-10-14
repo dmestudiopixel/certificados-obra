@@ -125,6 +125,7 @@ async function bootstrap() {
   if (S.yo.rol === "veedor") S.tab = "cert";
   await recargarQuincena();
   render();
+  avisoBackup();
 }
 async function recargarQuincena() {
   const [d, a] = await Promise.all([

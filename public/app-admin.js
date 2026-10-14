@@ -151,11 +151,15 @@ function vUsuarios() {
       </tbody></table></div>
     <div class="card" style="margin-top:14px"><div class="bar">
       <span class="eyebrow">Backup</span>
-      <span style="font-size:11.5px;color:var(--muted)">Descarga un archivo con todos los datos
-        (casas, tareas, contratistas, quincenas, precios, cargas y anticipos).
-        Guardalo en la PC o en Drive, por ejemplo antes de cerrar cada quincena.</span>
+      <span id="backupEstado" style="font-size:12px">…</span>
       <div class="spacer"></div>
-      <button class="btn" id="btnBackup">Descargar backup</button></div></div>
+      <button class="btn ghost" id="btnBackup">Solo datos (JSON)</button>
+      <button class="btn" id="btnBackupZip">Backup completo (ZIP)</button></div>
+      <div style="padding:2px 14px 12px;font-size:11.5px;color:var(--muted);line-height:1.5">
+        El <b>backup completo</b> trae todos los datos (con los usuarios y sus claves cifradas),
+        la aplicación entera y las instrucciones para volver a levantar la web desde cero.
+        Conviene bajarlo <b>cada 15 días</b> y guardarlo en Drive y en un pendrive.
+        No lo mandes por WhatsApp ni por mail.</div></div>
     <div class="card" style="margin-top:14px"><div class="bar">
       <span class="eyebrow">Bitácora</span>
       <span style="font-size:11.5px;color:var(--muted)">Últimos movimientos del sistema</span></div>
@@ -177,6 +181,7 @@ async function cargarUsuarios() {
            style="padding:4px 9px;margin-left:5px">${u.activo ? "Desactivar" : "Activar"}</button>`
         : '<span style="color:var(--muted);font-size:11px;margin-left:8px">tu cuenta</span>'}
       </td></tr>`).join("")}</tbody></table>`;
+    pintarEstadoBackup(await api("GET", "/api/backup-estado"));
     const bit = await api("GET", "/api/bitacora");
     $("bitacora").innerHTML = !bit.length
       ? `<div class="empty">Sin movimientos.</div>`
@@ -187,6 +192,33 @@ async function cargarUsuarios() {
          <td>${esc(b.unombre || "—")}</td><td class="mono" style="font-size:11.5px">${esc(b.accion)}</td>
          <td style="color:var(--muted)">${esc(b.detalle || "")}</td></tr>`).join("")}</tbody></table>`;
   } catch (e) { $("listaUsuarios").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+/* días desde el último backup completo (null si nunca se bajó) */
+const diasDesde = f => f ? Math.floor((Date.now() - new Date(f)) / 864e5) : null;
+
+function pintarEstadoBackup(e) {
+  const el = $("backupEstado"); if (!el) return;
+  const d = diasDesde(e.ultimo);
+  const vencido = d === null || d >= e.cadaDias;
+  el.style.color = vencido ? "var(--over)" : "var(--muted)";
+  el.innerHTML = d === null
+    ? "<b>Nunca se bajó un backup completo.</b>"
+    : `Último backup completo: ${new Date(e.ultimo).toLocaleDateString("es-AR")}` +
+      ` (${d === 0 ? "hoy" : d === 1 ? "ayer" : "hace " + d + " días"}${e.por ? ", " + esc(e.por) : ""})` +
+      (vencido ? ` — <b>toca hacer uno nuevo</b>` : "");
+}
+
+/* al entrar, el administrador ve un aviso si pasaron 15 días sin backup completo */
+async function avisoBackup() {
+  if (!esAdmin()) return;
+  try {
+    const e = await api("GET", "/api/backup-estado");
+    const d = diasDesde(e.ultimo);
+    if (d === null || d >= e.cadaDias)
+      avisar(d === null ? "Todavía no se bajó ningún backup completo. Está en Usuarios → Backup."
+        : `Hace ${d} días del último backup completo. Bajá uno nuevo en Usuarios → Backup.`);
+  } catch {}
 }
 
 /* baja el backup completo como archivo; espera a que termine antes de seguir */
@@ -318,6 +350,17 @@ document.addEventListener("click", async e => {
     }
     if (b.id === "btnBackup") {
       await descargarBackup(); avisar("Backup descargado.", true); return;
+    }
+    if (b.id === "btnBackupZip") {
+      // lo descarga el navegador directo (puede tardar unos segundos)
+      const a = document.createElement("a");
+      a.href = "/api/backup-completo"; a.download = "";
+      document.body.appendChild(a); a.click(); a.remove();
+      avisar("Armando el backup completo… se descarga en unos segundos.", true);
+      setTimeout(async () => {
+        try { pintarEstadoBackup(await api("GET", "/api/backup-estado")); } catch {}
+      }, 6000);
+      return;
     }
     if (b.id === "btnAbrir") {
       if (!confirm(`¿Reabrir ${Q().nombre}?\n\nVuelve a quedar editable para el usuario de carga.`)) return;

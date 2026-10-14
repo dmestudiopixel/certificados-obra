@@ -3,8 +3,9 @@ const express = require("express");
 const cookieParser = require("cookie-parser");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const { q, tx, migrar } = require("./db");
+const { pool, q, tx, migrar } = require("./db");
 const sembrar = require("./seed");
+const { armarBackup } = require("./backup");
 
 const app = express();
 const SECRET = process.env.JWT_SECRET || "cambiar-esta-clave-en-railway";
@@ -355,6 +356,27 @@ app.get("/api/backup", auth, esAdmin, async (req, res) => {
     res.json({ sistema: "certificados-obra", generado: ahora.toISOString(),
       por: req.user.usuario, datos });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* Backup COMPLETO en ZIP: datos (con usuarios y claves cifradas), la aplicación
+   e instrucciones. Se restaura en una base vacía con restaurar.js. */
+app.get("/api/backup-completo", auth, esAdmin, async (req, res) => {
+  try {
+    await armarBackup(pool, res);
+    await log(req.user.id, "backup_completo", "");
+  } catch (e) {
+    console.error("backup completo:", e.message);
+    if (!res.headersSent) res.status(500).json({ error: "No se pudo armar el backup: " + e.message });
+    else res.destroy(e);
+  }
+});
+
+// cuándo se bajó el último backup completo (para el aviso de cada 15 días)
+app.get("/api/backup-estado", auth, esAdmin, async (req, res) => {
+  const { rows: [b] } = await q(`SELECT b.creado, u.nombre FROM bitacora b
+    LEFT JOIN usuarios u ON u.id=b.usuario_id
+    WHERE b.accion='backup_completo' ORDER BY b.creado DESC LIMIT 1`);
+  res.json({ ultimo: b ? b.creado : null, por: b ? b.nombre : null, cadaDias: 15 });
 });
 
 /* ═══════════ precios ═══════════ */
