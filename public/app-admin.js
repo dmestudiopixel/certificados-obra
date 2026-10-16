@@ -173,12 +173,19 @@ async function cargarUsuarios() {
       <th>Usuario</th><th>Nombre</th><th>Rol</th><th>Estado</th>
       <th style="width:210px">Acciones</th></tr></thead><tbody>${us.map(u => `<tr>
       <td class="mono">${esc(u.usuario)}</td><td>${esc(u.nombre)}</td>
-      <td><span class="badge ${u.rol}">${u.rol}</span></td>
+      <td>${u.id === S.yo.id
+        ? `<span class="badge ${u.rol}">${u.rol}</span>`
+        : `<select data-rol="${u.id}" data-antes="${u.rol}" data-nom="${esc(u.nombre)}" title="Cambiar rol">${
+            [["admin", "Administrador"], ["cargador", "Carga de quincena"], ["veedor", "Solo ver"]]
+            .map(([v, t]) => `<option value="${v}"${u.rol === v ? " selected" : ""}>${t}</option>`).join("")}
+          </select>`}</td>
       <td>${u.activo ? "Activo" : '<span style="color:var(--over)">Desactivado</span>'}</td>
-      <td><button class="btn ghost" data-pass="${u.id}" style="padding:4px 9px">Cambiar clave</button>
+      <td style="white-space:nowrap"><button class="btn ghost" data-pass="${u.id}" style="padding:4px 9px">Cambiar clave</button>
       ${u.id !== S.yo.id
         ? `<button class="btn ghost" data-act="${u.id}|${u.activo ? 0 : 1}"
-           style="padding:4px 9px;margin-left:5px">${u.activo ? "Desactivar" : "Activar"}</button>`
+           style="padding:4px 9px;margin-left:5px">${u.activo ? "Desactivar" : "Activar"}</button>
+           <button class="btn danger" data-delusr="${u.id}" data-nom="${esc(u.nombre)}"
+           style="padding:4px 9px;margin-left:5px">Eliminar</button>`
         : '<span style="color:var(--muted);font-size:11px;margin-left:8px">tu cuenta</span>'}
       </td></tr>`).join("")}</tbody></table>`;
     pintarEstadoBackup(await api("GET", "/api/backup-estado"));
@@ -260,6 +267,13 @@ document.addEventListener("change", async e => {
       S.qid = +el.value; await recargarQuincena(); render(); return;
     }
     if (el.id === "chkOcultar") { S.ocultar = el.checked; render(); return; }
+    if (el.dataset.rol) {
+      const t = el.options[el.selectedIndex].text;
+      if (!confirm(`¿Cambiar el rol de ${el.dataset.nom} a "${t}"?`)) { el.value = el.dataset.antes; return; }
+      try { await api("PATCH", "/api/usuarios/" + el.dataset.rol, { rol: el.value }); }
+      catch (x) { el.value = el.dataset.antes; throw x; }
+      cargarUsuarios(); avisar(`${el.dataset.nom} ahora es "${t}".`, true); return;
+    }
     if (el.id === "certC") { S.certC = +el.value; render(); return; }
     if (el.id === "certQ") { S.certQ = +el.value; render(); return; }
     if (el.id === "repQ") { S.repQ = +el.value; render(); return; }
@@ -427,6 +441,12 @@ document.addEventListener("click", async e => {
       const [id, act] = b.dataset.act.split("|");
       await api("PATCH", "/api/usuarios/" + id, { activo: act === "1" });
       cargarUsuarios(); return;
+    }
+    if (b.dataset.delusr) {
+      if (!confirm(`¿Eliminar a ${b.dataset.nom}?\n\nNo se puede deshacer. ` +
+        `Si tiene cargas a su nombre no se va a poder eliminar: en ese caso desactivalo.`)) return;
+      await api("DELETE", "/api/usuarios/" + b.dataset.delusr);
+      cargarUsuarios(); avisar(`${b.dataset.nom} eliminado.`, true); return;
     }
   } catch (x) { avisar(x.message); }
 });

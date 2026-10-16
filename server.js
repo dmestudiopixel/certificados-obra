@@ -17,11 +17,21 @@ app.use(express.static("public"));
 
 /* ═══════════ autenticación y roles ═══════════ */
 
-function auth(req, res, next) {
+// valida el token y relee el usuario de la base: si lo desactivaron, lo borraron
+// o le cambiaron el rol, se aplica en el próximo pedido (no al vencer la sesión)
+async function auth(req, res, next) {
   const t = req.cookies.token;
   if (!t) return res.status(401).json({ error: "Necesitás iniciar sesión" });
-  try { req.user = jwt.verify(t, SECRET); next(); }
-  catch { res.status(401).json({ error: "Sesión vencida" }); }
+  let tok;
+  try { tok = jwt.verify(t, SECRET); }
+  catch { return res.status(401).json({ error: "Sesión vencida" }); }
+  try {
+    const { rows: [u] } = await q(
+      "SELECT id,usuario,nombre,rol FROM usuarios WHERE id=$1 AND activo", [tok.id]);
+    if (!u) { res.clearCookie("token"); return res.status(401).json({ error: "Tu usuario ya no tiene acceso" }); }
+    req.user = u;
+    next();
+  } catch (e) { res.status(500).json({ error: e.message }); }
 }
 const rol = (...permitidos) => (req, res, next) =>
   permitidos.includes(req.user.rol) ? next()
@@ -83,11 +93,31 @@ app.post("/api/usuarios", auth, esAdmin, async (req, res) => {
   }
 });
 
+const ROLES = ["admin", "cargador", "veedor"];
+
+// cuántos administradores activos quedan sin contar al usuario id
+async function otrosAdmins(id) {
+  const { rows: [r] } = await q(
+    "SELECT COUNT(*)::int AS n FROM usuarios WHERE rol='admin' AND activo AND id<>$1", [id]);
+  return r.n;
+}
+
 app.patch("/api/usuarios/:id", auth, esAdmin, async (req, res) => {
   const { nombre, rol: r, activo, clave } = req.body || {};
   const id = +req.params.id;
+  const { rows: [u] } = await q("SELECT id,usuario,rol,activo FROM usuarios WHERE id=$1", [id]);
+  if (!u) return res.status(404).json({ error: "Usuario inexistente" });
   if (id === req.user.id && activo === false)
     return res.status(400).json({ error: "No podés desactivar tu propia cuenta" });
+  if (r !== undefined) {
+    if (!ROLES.includes(r)) return res.status(400).json({ error: "Rol inválido" });
+    if (id === req.user.id && r !== u.rol)
+      return res.status(400).json({ error: "No podés cambiar tu propio rol. Pedíselo a otro administrador." });
+  }
+  const dejaDeSerAdmin = u.rol === "admin" && u.activo &&
+    ((r !== undefined && r !== "admin") || activo === false);
+  if (dejaDeSerAdmin && !(await otrosAdmins(id)))
+    return res.status(400).json({ error: "Tiene que quedar al menos un administrador activo." });
   const sets = [], vals = [];
   if (nombre !== undefined) { sets.push(`nombre=$${sets.length + 1}`); vals.push(nombre); }
   if (r !== undefined) { sets.push(`rol=$${sets.length + 1}`); vals.push(r); }
@@ -99,8 +129,46 @@ app.patch("/api/usuarios/:id", auth, esAdmin, async (req, res) => {
   if (!sets.length) return res.json({ ok: true });
   vals.push(id);
   await q(`UPDATE usuarios SET ${sets.join(",")} WHERE id=$${vals.length}`, vals);
-  await log(req.user.id, "usuario_edita", "id " + id);
+  const det = [u.usuario];
+  if (r !== undefined && r !== u.rol) det.push(`rol ${u.rol} → ${r}`);
+  if (activo !== undefined && activo !== u.activo) det.push(activo ? "activado" : "desactivado");
+  if (clave) det.push("clave cambiada");
+  await log(req.user.id, "usuario_edita", det.join(" · "));
   res.json({ ok: true });
+});
+
+// eliminar: solo si no cargó nada. Si tiene cargas, se desactiva (así queda
+// registrado quién cargó qué). Sus movimientos de bitácora se conservan con su nombre.
+app.delete("/api/usuarios/:id", auth, esAdmin, async (req, res) => {
+  const id = +req.params.id;
+  try {
+    const { rows: [u] } = await q("SELECT id,usuario,nombre,rol,activo FROM usuarios WHERE id=$1", [id]);
+    if (!u) return res.status(404).json({ error: "Usuario inexistente" });
+    if (id === req.user.id) return res.status(400).json({ error: "No podés eliminar tu propia cuenta" });
+    if (u.rol === "admin" && u.activo && !(await otrosAdmins(id)))
+      return res.status(400).json({ error: "Tiene que quedar al menos un administrador activo." });
+
+    const { rows: [n] } = await q(
+      `SELECT (SELECT COUNT(*) FROM cargas WHERE usuario_id=$1)::int AS cargas,
+              (SELECT COUNT(*) FROM globales WHERE usuario_id=$1)::int AS globales,
+              (SELECT COUNT(*) FROM anticipos WHERE usuario_id=$1)::int AS anticipos,
+              (SELECT COUNT(*) FROM quincenas WHERE cerrada_por=$1)::int AS cierres`, [id]);
+    const partes = [];
+    if (n.cargas + n.globales) partes.push(`${n.cargas + n.globales} carga(s)`);
+    if (n.anticipos) partes.push(`${n.anticipos} anticipo(s)`);
+    if (n.cierres) partes.push(`${n.cierres} cierre(s) de quincena`);
+    if (partes.length)
+      return res.status(409).json({ error: `${u.nombre} tiene ${partes.join(", ")} a su nombre, ` +
+        `así que no se puede eliminar sin perder ese registro. Desactivalo: no va a poder entrar más.` });
+
+    await tx(async c => {
+      await c.query(`UPDATE bitacora SET usuario_id=NULL,
+        detalle='[' || $2 || '] ' || COALESCE(detalle,'') WHERE usuario_id=$1`, [id, u.nombre]);
+      await c.query("DELETE FROM usuarios WHERE id=$1", [id]);
+    });
+    await log(req.user.id, "usuario_baja", `${u.usuario} (${u.nombre}, ${u.rol})`);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 /* ═══════════ obra completa ═══════════ */
